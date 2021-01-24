@@ -4,6 +4,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -25,7 +26,7 @@ import lombok.extern.slf4j.Slf4j;
  * tasks for saving redundant tasks. <br/>
  * Highlight features:
  * <ul>
- * <li> Ability to override pending objects tasks for saving redundant tasks.
+ * <li> Ability to override pending/running objects tasks for saving redundant tasks.
  * <li> Asynchronous retry mechanism for data objects processing tasks.
  * <li> Save potential memory by holding data objects instead of tasks class instances.
  * <li> No redundant live threads where there are no pending tasks.
@@ -81,15 +82,17 @@ public class DataProcessor {
 	private AtomicInteger runningTasksCount;
 	private AtomicInteger submittedOrRunningTasksCount;
 	private DataObjectProcessor dataObjectProcessor;
-	private Map<Object, Object> dataMap = new LinkedHashMap<>();
+	private Map<Object, DataObject> dataMap = new LinkedHashMap<>();
+	private Map<Object, DataObject> runningDataMap = new ConcurrentHashMap<>();
 	private ResultHandler resultHandler;
 	private DataObjectProcessResultHandler dataObjectProcessResultHandler;
 	private FailureHandler failureHandler;
+	private boolean shouldAggregateIfAlreadyRunning = false;
 
 	@Builder
 	public DataProcessor(Integer numOfThreads, Long retryDelay, TimeUnit retryDelayTimeUnit, int retries,
 			DataObjectProcessor dataObjectProcessor, DataObjectProcessResultHandler dataObjectProcessResultHandler,
-			FailureHandler failureHandler) {
+			FailureHandler failureHandler, boolean shouldAggregateIfAlreadyRunning) {
 		super();
 		this.numOfThreads = numOfThreads;
 		this.retryDelay = retryDelay;
@@ -99,6 +102,7 @@ public class DataProcessor {
 		this.dataObjectProcessResultHandler = dataObjectProcessResultHandler;
 		this.resultHandler = buildResultHandler();
 		this.failureHandler = failureHandler;
+		this.shouldAggregateIfAlreadyRunning = shouldAggregateIfAlreadyRunning;
 		if (dataObjectProcessor == null) {
 			throw new IllegalArgumentException("dataObjectProcessor is missing");
 		}
@@ -115,13 +119,14 @@ public class DataProcessor {
 		return (Supplier<Boolean> supplier, Boolean result) -> {
 			try {
 				submittedOrRunningTasksCount.decrementAndGet();
-				processDataObjects();
 				if (supplier instanceof DataProcessorSupplier) {
-					Object dataObject = ((DataProcessorSupplier)supplier).getDataObject();
+					DataObject dataObject = ((DataProcessorSupplier)supplier).getDataObject();
+					runningDataMap.remove(dataObject.getKey());
 					dataObjectProcessResultHandler.handleResult(dataObject, result);
 				} else {
 					log.error("Unexpected supplier");
 				}
+				processDataObjects();
 			} catch (Exception e) {
 				log.error("Error handleResult." + e.getMessage(), e);
 			}
@@ -130,13 +135,22 @@ public class DataProcessor {
 	
 	/**
 	 * Aggregate data object to be executed when available.
-	 * @param key - key for the data object.
-	 * @param dataObject - the data object.
+	 * @param key - key for the data.
+	 * @param data - the data.
 	 * @throws Exception in case of error.
 	 */
-	public void aggregate(Object key, Object dataObject) throws ProcessingException {
+	public void aggregate(Object key, Object data) throws ProcessingException {
+		DataObject dataObject = DataObject.builder().key(key).data(data).build();
+		aggregate(dataObject);
+	}
+	
+	private void aggregate(DataObject dataObject) throws ProcessingException {
+		if (!shouldAggregateIfAlreadyRunning && runningDataMap.containsKey(dataObject.getKey())) {
+			log.info("Not aggregating {} as it is already have a running task.");
+			return;
+		}
 		synchronized (dataMap) {
-			dataMap.put(key, dataObject);
+			dataMap.put(dataObject.getKey(), dataObject);
 		}
 		processDataObjects();
 	}
@@ -164,26 +178,27 @@ public class DataProcessor {
 	
 	protected void processNextDataObject() {
 		log.debug("processNextDataObject");
-		Object dataObject = null;
+		DataObject dataObject = null;
 		synchronized (dataMap) {
 			dataObject  = poll();
         }
         if (dataObject != null) {
+        	runningDataMap.put(dataObject.getKey(), dataObject);
         	processDataObject(dataObject);
         }
     }
 	
-	private Object poll() {
-    	Iterator<Entry<Object, Object>> it = dataMap.entrySet().iterator();
+	private DataObject poll() {
+    	Iterator<Entry<Object, DataObject>> it = dataMap.entrySet().iterator();
     	if (it.hasNext()) {
-    		Entry<Object, Object> entry = it.next();
+    		Entry<Object, DataObject> entry = it.next();
     		it.remove();
     		return entry.getValue();
     	}
     	return null;
     }
 	
-	private void processDataObject(Object dataObject) {
+	private void processDataObject(DataObject dataObject) {
 		Supplier<Boolean> supplier = new DataProcessorSupplier(dataObject);
 		submittedOrRunningTasksCount.incrementAndGet();
 		retryExecutor.executeAsync(supplier, pool, retryDelay, retryDelayTimeUnit, retries, 
@@ -194,7 +209,7 @@ public class DataProcessor {
 	private class DataProcessorSupplier implements Supplier<Boolean> {
 		
 		@Getter
-		private Object dataObject;
+		private DataObject dataObject;
 
 		@Override
 		public Boolean get() {

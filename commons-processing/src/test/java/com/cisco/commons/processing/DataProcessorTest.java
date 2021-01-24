@@ -1,5 +1,6 @@
 package com.cisco.commons.processing;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 import java.util.Arrays;
@@ -37,14 +38,19 @@ public class DataProcessorTest {
 		int retries = 1;
 		Long retryDelay = 1L;
 		TimeUnit retryDelayTimeUnit = TimeUnit.SECONDS;
+		String testKey = "a1";
+		AtomicInteger testKeyProcessedCount = new AtomicInteger(0);
 		AtomicInteger processedDataObjectsCount = new AtomicInteger(0);
 		DataObjectProcessor dataObjectProcessor = new DataObjectProcessor() {
 			
 			@Override
-			public boolean process(Object dataObject) {
+			public boolean process(DataObject dataObject) {
 				sleepQuitely(100);
-				log.info("processed dataObject: {}", dataObject);
+				log.info("processed dataObject: {}", dataObject.getKey());
 				processedDataObjectsCount.incrementAndGet();
+				if (testKey.equals(dataObject.getKey())) {
+					testKeyProcessedCount.incrementAndGet();
+				}
 				return true;
 			}
 		};
@@ -64,7 +70,10 @@ public class DataProcessorTest {
 		DataProcessor dataProcessor = DataProcessor.builder().dataObjectProcessor(dataObjectProcessor)
 				.dataObjectProcessResultHandler(resultHandler).failureHandler(failureHandler).numOfThreads(numOfThreads)
 				.retries(retries).retryDelay(retryDelay).retryDelayTimeUnit(retryDelayTimeUnit).build();
+		dataProcessor.aggregate(testKey, "dataObject_a1_value1");
+		dataProcessor.aggregate(testKey, "dataObject_a1_value2");
 		int count = numOfThreads * 3;
+		log.info("count: {} ", count);
 		for (int i = 0; i < count; i++) {
 			dataProcessor.aggregate(String.valueOf(i), "dataObject" + i);
 		}
@@ -76,7 +85,8 @@ public class DataProcessorTest {
 		}
 		Thread.sleep(2000);
 		log.info("Processed {} data objects.", processedDataObjectsCount.get());
-		assertTrue(processedDataObjectsCount.get() >= count && processedDataObjectsCount.get() <= count*2);
+		assertTrue(processedDataObjectsCount.get() >= count + 1 && processedDataObjectsCount.get() <= count*2 - 1);
+		assertEquals(1, testKeyProcessedCount.get());
 	}
 	
 	private void sleepQuitely(long millis) {

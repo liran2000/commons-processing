@@ -1,7 +1,13 @@
 package com.cisco.commons.processing;
 
+import lombok.Builder;
+import lombok.Getter;
+
 /**
- * Data object processor.
+ * Data object.
+ * 
+ * Contains a logical key for the data object.
+ * Multiple data objects representing same data should have the same key.
  * 
  * @author Liran Mendelovich
  * 
@@ -16,12 +22,10 @@ package com.cisco.commons.processing;
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-public interface DataObjectProcessor {
+@Builder
+@Getter
+public class DataObject {
 	
-	/**
-	 * Data object process logic.
-	 * @param dataObject - the data object.
-	 * @return - success or failure.
-	 */
-	public boolean process(DataObject dataObject);
+	private Object key;
+	private Object data;
 }
