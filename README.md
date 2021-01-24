@@ -4,6 +4,11 @@ Using Independent retry executor.
 
 **Note**: This is not an official Cisco product.
 
+## Flow Diagram
+![Commons processing](./docs/commons-processing.jpg)
+
+[commons-processing.drawio](./docs/commons-processing.drawio)
+
 ### Highlight features 
 * Ability to override pending objects tasks for saving redundant tasks. 
 * Asynchronous retry mechanism for data objects processing tasks. 
@@ -30,9 +35,19 @@ Theoretically, this solution can fit also for persistent messaging processing by
 DataProcessor:
 
 ```
+DataObjectProcessor dataObjectProcessor = new DataObjectProcessor() {
+			
+	@Override
+	public boolean process(DataObject dataObject) {
+		log.info("processing dataObject: {}", dataObject.getData());
+		return true;
+	}
+};
+
 DataProcessor dataProcessor = DataProcessor.builder().dataObjectProcessor(dataObjectProcessor)
 				.dataObjectProcessResultHandler(resultHandler).failureHandler(failureHandler).numOfThreads(numOfThreads)
 				.retries(retries).retryDelay(retryDelay).retryDelayTimeUnit(retryDelayTimeUnit).build();
+				
 dataProcessor.aggregate(1, dataObject);
 ```
 
