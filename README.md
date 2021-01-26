@@ -59,6 +59,10 @@ retryExecutor.executeAsync(supplier, pool, retryDelaySeconds, TimeUnit.SECONDS, 
 ```
 See unit test classes for further details.
 
+## Contributions
+ * [Contributing](CONTRIBUTING.md) - how to contribute.
+ * [Contributors](docs/CONTRIBUTORS.md) - Folks who have contributed, thanks very much!
+
 ## Licensing
 
 ```
