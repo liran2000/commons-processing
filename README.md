@@ -1,10 +1,16 @@
 ## Commons processing
-Processing data objects by multiple parallel consumers with ability to override pending objects tasks for saving redundant tasks.  
-Using Independent retry executor.
+Processing data objects/messages by multiple parallel consumers with ability to override pending objects tasks for saving redundant data and tasks, based on queue map.  
+Using Independent asynchronous retry executor.
 
 **Note**: This is not an official Cisco product.
 
+## Problem & Solution
+![queue](./docs/queue.jpg)
+
+[queue.drawio](./docs/queue.drawio)
+
 ## Flow Diagram
+  
 ![Commons processing](./docs/commons-processing.jpg)
 
 [commons-processing.drawio](./docs/commons-processing.drawio)
