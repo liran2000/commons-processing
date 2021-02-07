@@ -10,24 +10,20 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 import org.junit.Test;
-import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
 import com.cisco.commons.processing.DataObject;
 import com.cisco.commons.processing.DataObjectProcessResultHandler;
 import com.cisco.commons.processing.DataObjectProcessor;
+import com.cisco.commons.processing.distributed.etcd.memory.MemoryClient;
 import com.cisco.commons.processing.retry.FailureHandler;
 
-import io.etcd.jetcd.launcher.EtcdCluster;
-import io.etcd.jetcd.test.EtcdClusterExtension;
 import lombok.extern.slf4j.Slf4j;
 
 @RunWith(Parameterized.class)
 @Slf4j
 public class ETCDDataProcessorTest {
-
-	@RegisterExtension static final EtcdCluster etcd = new EtcdClusterExtension("test-etcd", 1);
 	
 	@Parameterized.Parameters
 	public static Collection<Integer> numOfThreadsCollection() {
@@ -43,8 +39,6 @@ public class ETCDDataProcessorTest {
 	@Test
 	public void eTCDDataProcessorTest() throws Exception {
 		log.info("eTCDDataProcessorTest running with numOfThreads: {}", numOfThreads);
-		String etcdUrl = etcd.getClientEndpoints().get(0).toString();
-		log.info("etcdUrl: {}", etcdUrl);
 		int retries = 1;
 		Long retryDelay = 1L;
 		TimeUnit retryDelayTimeUnit = TimeUnit.SECONDS;
@@ -78,8 +72,10 @@ public class ETCDDataProcessorTest {
 			}
 		};
 		ETCDDataProcessor dataProcessor = ETCDDataProcessor.newBuilder().dataObjectProcessor(dataObjectProcessor)
-				.dataObjectProcessResultHandler(resultHandler).failureHandler(failureHandler).numOfThreads(numOfThreads)
-				.retries(retries).retryDelay(retryDelay).retryDelayTimeUnit(retryDelayTimeUnit).etcdUrl(etcdUrl ).build();
+			.dataObjectProcessResultHandler(resultHandler).failureHandler(failureHandler).numOfThreads(numOfThreads)
+			.retries(retries).retryDelay(retryDelay).retryDelayTimeUnit(retryDelayTimeUnit).etcdUrl(null)
+			.client(new MemoryClient())
+			.build();
 		dataProcessor.aggregate(testKey, "dataObject_a1_value1");
 		dataProcessor.aggregate(testKey, "dataObject_a1_value2");
 		int count = numOfThreads * 3;

@@ -186,9 +186,14 @@ public class DataProcessor {
         if (dataObject != null) {
         	runningDataMap.put(dataObject.getKey(), dataObject);
         	processDataObject(dataObject);
+        	postProcess(dataObject);
         }
     }
 	
+	protected void postProcess(DataObject dataObject) throws Exception {
+		
+	}
+
 	protected DataObject poll() throws Exception {
 			synchronized (dataMap) {
 	    	Iterator<Entry<Object, DataObject>> it = dataMap.entrySet().iterator();

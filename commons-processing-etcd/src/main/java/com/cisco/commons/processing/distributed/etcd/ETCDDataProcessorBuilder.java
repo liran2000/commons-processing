@@ -6,6 +6,7 @@ import com.cisco.commons.processing.DataObjectProcessResultHandler;
 import com.cisco.commons.processing.DataObjectProcessor;
 import com.cisco.commons.processing.retry.FailureHandler;
 
+import io.etcd.jetcd.Client;
 import lombok.ToString;
 
 @ToString
@@ -18,8 +19,9 @@ public class ETCDDataProcessorBuilder {
 	private DataObjectProcessResultHandler dataObjectProcessResultHandler;
 	private FailureHandler failureHandler;
 	private boolean shouldAggregateIfAlreadyRunning;
-	
 	private String etcdUrl;
+	
+	private Client client;
 	
 	public ETCDDataProcessorBuilder numOfThreads(Integer numOfThreads) {
 		this.numOfThreads = numOfThreads;
@@ -66,10 +68,15 @@ public class ETCDDataProcessorBuilder {
 		this.shouldAggregateIfAlreadyRunning = shouldAggregateIfAlreadyRunning;
 		return this;
 	}
+	
+	public ETCDDataProcessorBuilder client(Client client) {
+		this.client = client;
+		return this;
+	}
 
 	public ETCDDataProcessor build() {
 		return new ETCDDataProcessor(this.numOfThreads, this.retryDelay, this.retryDelayTimeUnit, this.retries,
 			this.dataObjectProcessor, this.dataObjectProcessResultHandler, this.failureHandler,
-			this.shouldAggregateIfAlreadyRunning, this.etcdUrl);
+			this.shouldAggregateIfAlreadyRunning, this.etcdUrl, client);
 	}
 }

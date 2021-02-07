@@ -22,6 +22,7 @@ import io.etcd.jetcd.KV;
 import io.etcd.jetcd.KeyValue;
 import io.etcd.jetcd.Lease;
 import io.etcd.jetcd.Lock;
+import io.etcd.jetcd.kv.DeleteResponse;
 import io.etcd.jetcd.kv.GetResponse;
 import io.etcd.jetcd.kv.PutResponse;
 import io.etcd.jetcd.lease.LeaseGrantResponse;
@@ -103,10 +104,13 @@ public class ETCDDataProcessor extends DataProcessor {
 
 	public ETCDDataProcessor(Integer numOfThreads, Long retryDelay, TimeUnit retryDelayTimeUnit, int retries,
 			DataObjectProcessor dataObjectProcessor, DataObjectProcessResultHandler dataObjectProcessResultHandler,
-			FailureHandler failureHandler, boolean shouldAggregateIfAlreadyRunning, String etcdUrl) {
+			FailureHandler failureHandler, boolean shouldAggregateIfAlreadyRunning, String etcdUrl, Client client) {
 		super(numOfThreads, retryDelay, retryDelayTimeUnit, retries, dataObjectProcessor, dataObjectProcessResultHandler, failureHandler, shouldAggregateIfAlreadyRunning);
 		gson = new Gson();
-		client = Client.builder().endpoints(etcdUrl).build();
+		this.client = client;
+		if (client == null) {
+			client = Client.builder().endpoints(etcdUrl).build();
+		}
 		kvClient = client.getKVClient();
 		lockClient = client.getLockClient();
 		leaseClient = client.getLeaseClient();
@@ -123,8 +127,7 @@ public class ETCDDataProcessor extends DataProcessor {
 
 			byte[] dataObjectKeyBytes = dataObjectMapKeyStr.getBytes(DEFAULT_CHARSET);
 			ByteSequence dataObjectKeyBytesSeq = ByteSequence.from(dataObjectKeyBytes);
-			byte[] dataObjectDataBytes = gson.toJson(dataObject.getData()).getBytes(DEFAULT_CHARSET);
-			ByteSequence dataObjectDataBytesSeq = ByteSequence.from(dataObjectDataBytes);
+			ByteSequence dataObjectDataBytesSeq = buildByteSeq(dataObject);
 
 
 			PutResponse valuePutResponse = kvClient.put(dataObjectKeyBytesSeq, dataObjectDataBytesSeq)
@@ -146,6 +149,12 @@ public class ETCDDataProcessor extends DataProcessor {
 		} finally {
 			unlockMap();
 		}
+	}
+
+	private ByteSequence buildByteSeq(DataObject dataObject) {
+		byte[] dataObjectDataBytes = gson.toJson(dataObject.getData()).getBytes(DEFAULT_CHARSET);
+		ByteSequence dataObjectDataBytesSeq = ByteSequence.from(dataObjectDataBytes);
+		return dataObjectDataBytesSeq;
 	}
 	
 	private void lockMap() throws InterruptedException, ExecutionException, TimeoutException {
@@ -175,7 +184,26 @@ public class ETCDDataProcessor extends DataProcessor {
 				String value = kvs.iterator().next().getValue().toString(DEFAULT_CHARSET);
 				return gson.fromJson(value, DataObject.class);
 			}
+			
+			// TODO replace value from pending to inprogress
+			
 			return null;
+		} finally {
+			unlockMap();
+		}
+	}
+	
+	@Override
+	protected void postProcess(DataObject dataObject) throws Exception {
+		
+		try {
+			lockMap();
+			
+			// TODO change key from pending to inprogress
+
+			ByteSequence dataObjectDataBytesSeq = buildByteSeq(dataObject);
+			CompletableFuture<DeleteResponse> res = kvClient.delete(dataObjectDataBytesSeq);
+			
 		} finally {
 			unlockMap();
 		}
