@@ -140,62 +140,65 @@ public class DataProcessor {
 	 * @throws Exception in case of error.
 	 */
 	public void aggregate(Object key, Object data) throws ProcessingException {
-		DataObject dataObject = DataObject.builder().key(key).data(data).build();
-		aggregate(dataObject);
+		try {
+			DataObject dataObject = DataObject.builder().key(key).data(data).build();
+			aggregate(dataObject);
+		} catch (Exception e) {
+			throw new ProcessingException("Error aggregating: " + e.getMessage(), e);
+		}
 	}
 	
-	private void aggregate(DataObject dataObject) throws ProcessingException {
+	protected void aggregate(DataObject dataObject) throws Exception {
 		if (!shouldAggregateIfAlreadyRunning && runningDataMap.containsKey(dataObject.getKey())) {
 			log.info("Not aggregating {} as it is already have a running task.");
 			return;
 		}
+		addDataObject(dataObject);
+		processDataObjects();
+	}
+
+	protected void addDataObject(DataObject dataObject) throws Exception {
 		synchronized (dataMap) {
 			dataMap.put(dataObject.getKey(), dataObject);
 		}
-		processDataObjects();
 	}
 	
-	public void processDataObjects() throws ProcessingException  {
-		try {
-			log.debug("Processing data objects. tasksCount: {}", runningTasksCount);
-			int count = 0;
-			int times = 2;
-			while (submittedOrRunningTasksCount.get() >= numOfThreads && count < times) {
-				if (runningTasksCount.get() >= numOfThreads) {
-			    	log.debug("Tasks count is larger or equals number of threads. Not processing.");
-			    	return;
-			    }
-				count++;
-				if (count < times) {
-					Thread.sleep(5);
-				}
+	public void processDataObjects() throws Exception  {
+		log.debug("Processing data objects. tasksCount: {}", runningTasksCount);
+		int count = 0;
+		int times = 2;
+		while (submittedOrRunningTasksCount.get() >= numOfThreads && count < times) {
+			if (runningTasksCount.get() >= numOfThreads) {
+		    	log.debug("Tasks count is larger or equals number of threads. Not processing.");
+		    	return;
+		    }
+			count++;
+			if (count < times) {
+				Thread.sleep(5);
 			}
-			processNextDataObject();
-		} catch (InterruptedException e) {
-			throw new ProcessingException("Error processDataObjects", e);
 		}
+		processNextDataObject();
     }
 	
-	protected void processNextDataObject() {
+	protected void processNextDataObject() throws Exception {
 		log.debug("processNextDataObject");
-		DataObject dataObject = null;
-		synchronized (dataMap) {
-			dataObject  = poll();
-        }
+		DataObject dataObject = poll();
         if (dataObject != null) {
         	runningDataMap.put(dataObject.getKey(), dataObject);
         	processDataObject(dataObject);
         }
     }
 	
-	private DataObject poll() {
-    	Iterator<Entry<Object, DataObject>> it = dataMap.entrySet().iterator();
-    	if (it.hasNext()) {
-    		Entry<Object, DataObject> entry = it.next();
-    		it.remove();
-    		return entry.getValue();
-    	}
-    	return null;
+	protected DataObject poll() throws Exception {
+			synchronized (dataMap) {
+	    	Iterator<Entry<Object, DataObject>> it = dataMap.entrySet().iterator();
+	    	if (it.hasNext()) {
+	    		Entry<Object, DataObject> entry = it.next();
+	    		it.remove();
+	    		return entry.getValue();
+	    	}
+	    	return null;
+		}
     }
 	
 	private void processDataObject(DataObject dataObject) {
