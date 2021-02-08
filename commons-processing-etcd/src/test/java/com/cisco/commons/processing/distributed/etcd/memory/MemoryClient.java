@@ -1,6 +1,9 @@
 package com.cisco.commons.processing.distributed.etcd.memory;
 
+import com.cisco.commons.processing.distributed.etcd.ETCDDataProcessor;
+
 import io.etcd.jetcd.Auth;
+import io.etcd.jetcd.ByteSequence;
 import io.etcd.jetcd.Client;
 import io.etcd.jetcd.Cluster;
 import io.etcd.jetcd.Election;
@@ -12,6 +15,9 @@ import io.etcd.jetcd.Watch;
 
 public class MemoryClient implements Client {
 	
+	private final static String DEFAULT_NAMESPACE = "";
+	
+	public final static ByteSequence NAMESPACE = buildByteSeq(DEFAULT_NAMESPACE);
 	private KV kv;
 	private Lock lock;
 	private Lease lease;
@@ -65,6 +71,11 @@ public class MemoryClient implements Client {
 	@Override
 	public void close() {
 		
+	}
+	
+	public static ByteSequence buildByteSeq(String str) {
+		byte[] strBytes = str.getBytes(ETCDDataProcessor.DEFAULT_CHARSET);
+		return ByteSequence.from(strBytes);
 	}
 
 }

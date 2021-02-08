@@ -84,19 +84,24 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class ETCDDataProcessor extends DataProcessor {
 
+	private static final String PENDING = "pending.";
+	private static final String INPROGRESS = "inprogress.";
 	private static final String QUEUE_MAP_PREFIX = "commons-processing-etcd.queue.map.";
-	private static final String QUEUE_MAP_TIMESTAMP_PENDING_PREFIX = QUEUE_MAP_PREFIX + "timestamp.pending.";
-	private static final String QUEUE_MAP_DATA_PREFIX = QUEUE_MAP_PREFIX + ".data.";
-	private static final Charset DEFAULT_CHARSET = StandardCharsets.UTF_8;
+	private static final String QUEUE_MAP_TIMESTAMP_PENDING_PREFIX = QUEUE_MAP_PREFIX + "timestamp." + PENDING;
+	private static final String QUEUE_MAP_TIMESTAMP_INPROGRESS_PREFIX = QUEUE_MAP_PREFIX + "timestamp." + INPROGRESS;
+	private static final String QUEUE_MAP_DATA_PREFIX = QUEUE_MAP_PREFIX + "data.";
+	public static final Charset DEFAULT_CHARSET = StandardCharsets.UTF_8;
 	private static final long MAX_DATA_OBJECT_PROCESSING_TIME_SECONDS = 60 * 5;
-	private static final ByteSequence QUEUE_MAP_LOCK = ByteSequence.from(QUEUE_MAP_PREFIX, DEFAULT_CHARSET);
 	
 	private Gson gson;
 	private Client client;
 	private KV kvClient;
 	private Lock lockClient;
 	private Lease leaseClient;
+	private ByteSequence queueMapLock;
 	private ByteSequence queueMapTimestampePendingPrefixByteSeq;
+	private ByteSequence queueMapTimestampeInprogressPrefixByteSeq;
+	private ByteSequence queueMapDataPrefixByteSeq;
 
 	public static ETCDDataProcessorBuilder newBuilder() {
 		return new ETCDDataProcessorBuilder();
@@ -114,8 +119,10 @@ public class ETCDDataProcessor extends DataProcessor {
 		kvClient = client.getKVClient();
 		lockClient = client.getLockClient();
 		leaseClient = client.getLeaseClient();
-		queueMapTimestampePendingPrefixByteSeq = ByteSequence.from(QUEUE_MAP_TIMESTAMP_PENDING_PREFIX.getBytes());
-
+		queueMapTimestampePendingPrefixByteSeq = ByteSequence.from(QUEUE_MAP_TIMESTAMP_PENDING_PREFIX, DEFAULT_CHARSET);
+		queueMapTimestampeInprogressPrefixByteSeq = ByteSequence.from(QUEUE_MAP_TIMESTAMP_INPROGRESS_PREFIX, DEFAULT_CHARSET);
+		queueMapDataPrefixByteSeq = ByteSequence.from(QUEUE_MAP_DATA_PREFIX, DEFAULT_CHARSET);
+		queueMapLock = ByteSequence.from(QUEUE_MAP_PREFIX, DEFAULT_CHARSET);
 	}
 
 	@Override
@@ -131,7 +138,7 @@ public class ETCDDataProcessor extends DataProcessor {
 
 
 			PutResponse valuePutResponse = kvClient.put(dataObjectKeyBytesSeq, dataObjectDataBytesSeq)
-					.get(30, TimeUnit.SECONDS);
+				.get(30, TimeUnit.SECONDS);
 			if (!valuePutResponse.hasPrevKv()) {
 
 				// TODO expose method to user for faster performance
@@ -152,22 +159,21 @@ public class ETCDDataProcessor extends DataProcessor {
 	}
 
 	private ByteSequence buildByteSeq(DataObject dataObject) {
-		byte[] dataObjectDataBytes = gson.toJson(dataObject.getData()).getBytes(DEFAULT_CHARSET);
-		ByteSequence dataObjectDataBytesSeq = ByteSequence.from(dataObjectDataBytes);
-		return dataObjectDataBytesSeq;
+		String dataObjectDataStr = gson.toJson(dataObject);
+		return ByteSequence.from(dataObjectDataStr, DEFAULT_CHARSET);
 	}
 	
 	private void lockMap() throws InterruptedException, ExecutionException, TimeoutException {
 		CompletableFuture<LeaseGrantResponse> leaseFuture = leaseClient.grant(MAX_DATA_OBJECT_PROCESSING_TIME_SECONDS);
 		LeaseGrantResponse leaseResponse = leaseFuture.get(30, TimeUnit.SECONDS);
 		long leaseId = leaseResponse.getID();
-		CompletableFuture<LockResponse> lockFuture = lockClient.lock(QUEUE_MAP_LOCK, leaseId);
+		CompletableFuture<LockResponse> lockFuture = lockClient.lock(queueMapLock, leaseId);
 		LockResponse response = lockFuture.get(MAX_DATA_OBJECT_PROCESSING_TIME_SECONDS, TimeUnit.SECONDS);
 	}
 	
 	private void unlockMap() throws Exception {
 		// TODO 30 to constant
-		UnlockResponse unlockResponse = lockClient.unlock(QUEUE_MAP_LOCK).get(30, TimeUnit.SECONDS);
+		UnlockResponse unlockResponse = lockClient.unlock(queueMapLock).get(30, TimeUnit.SECONDS);
 	}
 
 	@Override
@@ -181,11 +187,38 @@ public class ETCDDataProcessor extends DataProcessor {
 			GetResponse response = getFuture.get(30, TimeUnit.SECONDS);
 			List<KeyValue> kvs = response.getKvs();
 			if (!kvs.isEmpty()) {
-				String value = kvs.iterator().next().getValue().toString(DEFAULT_CHARSET);
-				return gson.fromJson(value, DataObject.class);
+				KeyValue kv = kvs.iterator().next();
+				ByteSequence keyBytesSeq = kv.getKey();
+				ByteSequence valueBytesSeq = kv.getValue();
+				String key = keyBytesSeq.toString(DEFAULT_CHARSET);
+				String value = valueBytesSeq.toString(DEFAULT_CHARSET);
+				log.info("Polled value: {}", value);
+				
+				// TODO constants
+				String inProgressKeyStr = key.replace("commons-processing-etcd.queue.map.timestamp.pending", 
+						"commons-processing-etcd.queue.map.timestamp.inprogress");
+				
+				byte[] inProgressKeyBytes = inProgressKeyStr.getBytes(DEFAULT_CHARSET);
+				ByteSequence inProgressKeyBytesSeq = ByteSequence.from(inProgressKeyBytes);
+
+
+				PutResponse valuePutResponse = kvClient.put(inProgressKeyBytesSeq, valueBytesSeq)
+						.get(30, TimeUnit.SECONDS);
+				
+				CompletableFuture<DeleteResponse> deleteResponse = kvClient.delete(keyBytesSeq);
+				
+				CompletableFuture<GetResponse> getDataFuture = kvClient.get(queueMapDataPrefixByteSeq,
+					getOption);
+				GetResponse responseData = getDataFuture.get(30, TimeUnit.SECONDS);
+				List<KeyValue> kvsData = responseData.getKvs();
+				if (!kvsData.isEmpty()) {
+					KeyValue dataKV = kvsData.iterator().next();
+					ByteSequence dataValueBytesSeq = dataKV.getValue();
+					String dataValue = dataValueBytesSeq.toString(DEFAULT_CHARSET);
+					log.info("Polled dataValue: {}", dataValue);
+					return gson.fromJson(dataValue, DataObject.class);
+				}
 			}
-			
-			// TODO replace value from pending to inprogress
 			
 			return null;
 		} finally {

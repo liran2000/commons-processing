@@ -16,37 +16,35 @@ public class MemoryLease implements Lease {
 
 	@Override
 	public CompletableFuture<LeaseGrantResponse> grant(long ttl) {
-		// TODO Auto-generated method stub
-		return null;
+		io.etcd.jetcd.api.LeaseGrantResponse response = io.etcd.jetcd.api.LeaseGrantResponse.newBuilder().build();
+		LeaseGrantResponse leaseGrantResponse = new LeaseGrantResponse(response);
+		CompletableFuture<LeaseGrantResponse> future = new CompletableFuture<>();
+		future.complete(leaseGrantResponse);
+		return future;
 	}
 
 	@Override
 	public CompletableFuture<LeaseGrantResponse> grant(long ttl, long timeout, TimeUnit unit) {
-		// TODO Auto-generated method stub
 		return null;
 	}
 
 	@Override
 	public CompletableFuture<LeaseRevokeResponse> revoke(long leaseId) {
-		// TODO Auto-generated method stub
 		return null;
 	}
 
 	@Override
 	public CompletableFuture<LeaseKeepAliveResponse> keepAliveOnce(long leaseId) {
-		// TODO Auto-generated method stub
 		return null;
 	}
 
 	@Override
 	public CompletableFuture<LeaseTimeToLiveResponse> timeToLive(long leaseId, LeaseOption leaseOption) {
-		// TODO Auto-generated method stub
 		return null;
 	}
 
 	@Override
 	public CloseableClient keepAlive(long leaseId, StreamObserver<LeaseKeepAliveResponse> observer) {
-		// TODO Auto-generated method stub
 		return null;
 	}
 

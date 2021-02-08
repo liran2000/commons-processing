@@ -42,7 +42,7 @@ public class MemoryKV implements KV {
 			apiPutResponseBuilder.setPrevKv(prevKv);
 		}
 		io.etcd.jetcd.api.PutResponse apiPutResponse = apiPutResponseBuilder.build();
-		PutResponse putResponse = new PutResponse(apiPutResponse, null);
+		PutResponse putResponse = new PutResponse(apiPutResponse, MemoryClient.NAMESPACE);
 		CompletableFuture<PutResponse> future = new CompletableFuture<>();
 		future.complete(putResponse);
 		return future;
@@ -90,7 +90,7 @@ public class MemoryKV implements KV {
 				count++;
 			}
 		}
-		GetResponse getResponse = new GetResponse(rangeResponseBuilder.build() , null);
+		GetResponse getResponse = new GetResponse(rangeResponseBuilder.build() , MemoryClient.NAMESPACE);
 		CompletableFuture<GetResponse> future = new CompletableFuture<>();
 		future.complete(getResponse);
 		return future;
@@ -100,7 +100,7 @@ public class MemoryKV implements KV {
 	public CompletableFuture<DeleteResponse> delete(ByteSequence key) {
 		map.remove(key);
 		DeleteRangeResponse deleteRangeResponse = DeleteRangeResponse.newBuilder().setDeleted(1).build();
-		DeleteResponse deleteResponse = new DeleteResponse(deleteRangeResponse, null);
+		DeleteResponse deleteResponse = new DeleteResponse(deleteRangeResponse, MemoryClient.NAMESPACE);
 		CompletableFuture<DeleteResponse> future = new CompletableFuture<>();
 		future.complete(deleteResponse);
 		return future;
