@@ -34,8 +34,8 @@ DataProcessor.aggregate():
 * 10 notifications are mapped to the same single queue map entry. 
 * 1 task is created and executed via the thread pool. 
 
-Theoretically, this solution can fit also for persistent messaging processing by replacing the data map implementation with persistent map using one of the persistent key-value storage products. 
-
+The solution is in-process, non-persistent and non-distributed.  
+For a persistent distributed solution, see [commons-processing-etcd](./commons-processing-etcd/README.md)
 
 ### Example usage
 DataProcessor:
@@ -51,8 +51,8 @@ DataObjectProcessor dataObjectProcessor = new DataObjectProcessor() {
 };
 
 DataProcessor dataProcessor = DataProcessor.builder().dataObjectProcessor(dataObjectProcessor)
-				.dataObjectProcessResultHandler(resultHandler).failureHandler(failureHandler).numOfThreads(numOfThreads)
-				.retries(retries).retryDelay(retryDelay).retryDelayTimeUnit(retryDelayTimeUnit).build();
+		.dataObjectProcessResultHandler(resultHandler).failureHandler(failureHandler).numOfThreads(numOfThreads)
+		.retries(retries).retryDelay(retryDelay).retryDelayTimeUnit(retryDelayTimeUnit).build();
 				
 dataProcessor.aggregate(1, dataObject);
 ```
@@ -63,7 +63,8 @@ RetryExecutor:
 RetryExecutor retryExecutor = RetryExecutor.builder().build();
 retryExecutor.executeAsync(supplier, pool, retryDelaySeconds, TimeUnit.SECONDS, retries, resultHandler, null);
 ```
-See unit test classes for further details.
+
+See [DataProcessorTest](./commons-processing/src/test/java/com/cisco/commons/processing/DataProcessorTest.java) for further details.
 
 ## Contributions
  * [Contributing](CONTRIBUTING.md) - how to contribute.

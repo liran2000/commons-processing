@@ -20,11 +20,16 @@ public class ETCDDataProcessorBuilder {
 	private FailureHandler failureHandler;
 	private boolean shouldAggregateIfAlreadyRunning;
 	private String etcdUrl;
-	
+	private RandomGenerator randomGenerator;
 	private Client client;
 	
 	public ETCDDataProcessorBuilder numOfThreads(Integer numOfThreads) {
 		this.numOfThreads = numOfThreads;
+		return this;
+	}
+	
+	public ETCDDataProcessorBuilder randomGenerator(RandomGenerator randomGenerator) {
+		this.randomGenerator = randomGenerator;
 		return this;
 	}
 	
@@ -77,6 +82,6 @@ public class ETCDDataProcessorBuilder {
 	public ETCDDataProcessor build() {
 		return new ETCDDataProcessor(this.numOfThreads, this.retryDelay, this.retryDelayTimeUnit, this.retries,
 			this.dataObjectProcessor, this.dataObjectProcessResultHandler, this.failureHandler,
-			this.shouldAggregateIfAlreadyRunning, this.etcdUrl, client);
+			this.shouldAggregateIfAlreadyRunning, this.etcdUrl, client, randomGenerator);
 	}
 }

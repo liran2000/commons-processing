@@ -3,7 +3,6 @@ package com.cisco.commons.processing.distributed.etcd;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
-import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -29,6 +28,8 @@ import io.etcd.jetcd.lease.LeaseGrantResponse;
 import io.etcd.jetcd.lock.LockResponse;
 import io.etcd.jetcd.lock.UnlockResponse;
 import io.etcd.jetcd.options.GetOption;
+import io.etcd.jetcd.options.GetOption.SortOrder;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -84,6 +85,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class ETCDDataProcessor extends DataProcessor {
 
+	private static final int REQUEST_TIMEOUT_SECONDS = 30;
 	private static final String PENDING = "pending.";
 	private static final String INPROGRESS = "inprogress.";
 	private static final String QUEUE_MAP_PREFIX = "commons-processing-etcd.queue.map.";
@@ -92,9 +94,8 @@ public class ETCDDataProcessor extends DataProcessor {
 	private static final String QUEUE_MAP_DATA_PREFIX = QUEUE_MAP_PREFIX + "data.";
 	public static final Charset DEFAULT_CHARSET = StandardCharsets.UTF_8;
 	private static final long MAX_DATA_OBJECT_PROCESSING_TIME_SECONDS = 60 * 5;
-	
+	private RandomGenerator randomGenerator;
 	private Gson gson;
-	private Client client;
 	private KV kvClient;
 	private Lock lockClient;
 	private Lease leaseClient;
@@ -102,6 +103,9 @@ public class ETCDDataProcessor extends DataProcessor {
 	private ByteSequence queueMapTimestampePendingPrefixByteSeq;
 	private ByteSequence queueMapTimestampeInprogressPrefixByteSeq;
 	private ByteSequence queueMapDataPrefixByteSeq;
+	
+	@Getter
+	private Client client;
 
 	public static ETCDDataProcessorBuilder newBuilder() {
 		return new ETCDDataProcessorBuilder();
@@ -109,12 +113,17 @@ public class ETCDDataProcessor extends DataProcessor {
 
 	public ETCDDataProcessor(Integer numOfThreads, Long retryDelay, TimeUnit retryDelayTimeUnit, int retries,
 			DataObjectProcessor dataObjectProcessor, DataObjectProcessResultHandler dataObjectProcessResultHandler,
-			FailureHandler failureHandler, boolean shouldAggregateIfAlreadyRunning, String etcdUrl, Client client) {
+			FailureHandler failureHandler, boolean shouldAggregateIfAlreadyRunning, String etcdUrl, Client client,
+			RandomGenerator randomGenerator) {
 		super(numOfThreads, retryDelay, retryDelayTimeUnit, retries, dataObjectProcessor, dataObjectProcessResultHandler, failureHandler, shouldAggregateIfAlreadyRunning);
 		gson = new Gson();
 		this.client = client;
-		if (client == null) {
-			client = Client.builder().endpoints(etcdUrl).build();
+		if (this.client == null) {
+			this.client = Client.builder().endpoints(etcdUrl).build();
+		}
+		this.randomGenerator = randomGenerator;
+		if (this.randomGenerator == null) {
+			this.randomGenerator = new UUIDRandomGenerator();
 		}
 		kvClient = client.getKVClient();
 		lockClient = client.getLockClient();
@@ -129,21 +138,14 @@ public class ETCDDataProcessor extends DataProcessor {
 	protected void addDataObject(DataObject dataObject) throws Exception {
 		try {
 			lockMap();
-
 			String dataObjectMapKeyStr = QUEUE_MAP_DATA_PREFIX + dataObject.getKey().toString();
-
 			byte[] dataObjectKeyBytes = dataObjectMapKeyStr.getBytes(DEFAULT_CHARSET);
 			ByteSequence dataObjectKeyBytesSeq = ByteSequence.from(dataObjectKeyBytes);
 			ByteSequence dataObjectDataBytesSeq = buildByteSeq(dataObject);
-
-
 			PutResponse valuePutResponse = kvClient.put(dataObjectKeyBytesSeq, dataObjectDataBytesSeq)
 				.get(30, TimeUnit.SECONDS);
 			if (!valuePutResponse.hasPrevKv()) {
-
-				// TODO expose method to user for faster performance
-				String randomString = UUID.randomUUID().toString();
-
+				String randomString = randomGenerator.generateRandomString();
 				String dataObjectMapTimestampKeyStr = QUEUE_MAP_TIMESTAMP_PENDING_PREFIX + 
 						System.currentTimeMillis() + "." + randomString;
 
@@ -151,7 +153,8 @@ public class ETCDDataProcessor extends DataProcessor {
 				ByteSequence dataObjectTimestampKeyBytesSeq = ByteSequence.from(dataObjectTimestampKeyBytes);
 
 				PutResponse timestampPutResponse = kvClient.put(dataObjectTimestampKeyBytesSeq, dataObjectKeyBytesSeq)
-						.get(30, TimeUnit.SECONDS);
+					.get(30, TimeUnit.SECONDS);
+				log.info("addDataObject prevKv: {}", timestampPutResponse.getPrevKv());
 			}
 		} finally {
 			unlockMap();
@@ -168,62 +171,59 @@ public class ETCDDataProcessor extends DataProcessor {
 		LeaseGrantResponse leaseResponse = leaseFuture.get(30, TimeUnit.SECONDS);
 		long leaseId = leaseResponse.getID();
 		CompletableFuture<LockResponse> lockFuture = lockClient.lock(queueMapLock, leaseId);
-		LockResponse response = lockFuture.get(MAX_DATA_OBJECT_PROCESSING_TIME_SECONDS, TimeUnit.SECONDS);
+		LockResponse lockResponse = lockFuture.get(MAX_DATA_OBJECT_PROCESSING_TIME_SECONDS, TimeUnit.SECONDS);
+		log.debug("lockResponse key: {}", lockResponse.getKey());
 	}
 	
 	private void unlockMap() throws Exception {
-		// TODO 30 to constant
-		UnlockResponse unlockResponse = lockClient.unlock(queueMapLock).get(30, TimeUnit.SECONDS);
+		UnlockResponse unlockResponse = lockClient.unlock(queueMapLock).get(REQUEST_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+		log.debug("unlockResponse header: {}", unlockResponse.getHeader());
 	}
 
 	@Override
 	protected DataObject poll() throws Exception {
 		try {
 			lockMap();
-
 			GetOption getOption = GetOption.newBuilder().withPrefix(queueMapTimestampePendingPrefixByteSeq)
-					.withLimit(1).build();
+				.withSortOrder(SortOrder.ASCEND).withLimit(1).build();
 			CompletableFuture<GetResponse> getFuture = kvClient.get(queueMapTimestampePendingPrefixByteSeq, getOption);
 			GetResponse response = getFuture.get(30, TimeUnit.SECONDS);
 			List<KeyValue> kvs = response.getKvs();
 			if (!kvs.isEmpty()) {
 				KeyValue kv = kvs.iterator().next();
-				ByteSequence keyBytesSeq = kv.getKey();
+				ByteSequence pendingKeyBytesSeq = kv.getKey();
 				ByteSequence valueBytesSeq = kv.getValue();
-				String key = keyBytesSeq.toString(DEFAULT_CHARSET);
-				String value = valueBytesSeq.toString(DEFAULT_CHARSET);
-				log.info("Polled value: {}", value);
-				
-				// TODO constants
-				String inProgressKeyStr = key.replace("commons-processing-etcd.queue.map.timestamp.pending", 
-						"commons-processing-etcd.queue.map.timestamp.inprogress");
-				
-				byte[] inProgressKeyBytes = inProgressKeyStr.getBytes(DEFAULT_CHARSET);
-				ByteSequence inProgressKeyBytesSeq = ByteSequence.from(inProgressKeyBytes);
-
-
-				PutResponse valuePutResponse = kvClient.put(inProgressKeyBytesSeq, valueBytesSeq)
-						.get(30, TimeUnit.SECONDS);
-				
-				CompletableFuture<DeleteResponse> deleteResponse = kvClient.delete(keyBytesSeq);
-				
-				CompletableFuture<GetResponse> getDataFuture = kvClient.get(queueMapDataPrefixByteSeq,
+				replacePendingWithInprogress(pendingKeyBytesSeq, valueBytesSeq);
+				CompletableFuture<GetResponse> getDataFuture = kvClient.get(valueBytesSeq,
 					getOption);
-				GetResponse responseData = getDataFuture.get(30, TimeUnit.SECONDS);
+				GetResponse responseData = getDataFuture.get(REQUEST_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 				List<KeyValue> kvsData = responseData.getKvs();
 				if (!kvsData.isEmpty()) {
 					KeyValue dataKV = kvsData.iterator().next();
 					ByteSequence dataValueBytesSeq = dataKV.getValue();
 					String dataValue = dataValueBytesSeq.toString(DEFAULT_CHARSET);
-					log.info("Polled dataValue: {}", dataValue);
 					return gson.fromJson(dataValue, DataObject.class);
 				}
 			}
-			
 			return null;
 		} finally {
 			unlockMap();
 		}
+	}
+
+	private void replacePendingWithInprogress(ByteSequence pendingKeyBytesSeq, ByteSequence valueBytesSeq)
+			throws InterruptedException, ExecutionException, TimeoutException {
+		String pendingKeyStr = pendingKeyBytesSeq.toString(DEFAULT_CHARSET);
+		String inProgressKeyStr = pendingKeyStr.replace(QUEUE_MAP_TIMESTAMP_PENDING_PREFIX, 
+			QUEUE_MAP_TIMESTAMP_INPROGRESS_PREFIX);
+		byte[] inProgressKeyBytes = inProgressKeyStr.getBytes(DEFAULT_CHARSET);
+		ByteSequence inProgressKeyBytesSeq = ByteSequence.from(inProgressKeyBytes);
+		PutResponse valuePutResponse = kvClient.put(inProgressKeyBytesSeq, valueBytesSeq)
+			.get(30, TimeUnit.SECONDS);
+		log.info("replacePendingWithInprogress valuePutResponse: {}", valuePutResponse.getPrevKv());
+		CompletableFuture<DeleteResponse> deleteResponseFuture = kvClient.delete(pendingKeyBytesSeq);
+		DeleteResponse deleteResponse = deleteResponseFuture.get(REQUEST_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+		log.debug("replacePendingWithInprogress deleteResponse deleted: {}", deleteResponse.getDeleted());
 	}
 	
 	@Override
@@ -231,11 +231,13 @@ public class ETCDDataProcessor extends DataProcessor {
 		
 		try {
 			lockMap();
+			String dataObjectMapKeyStr = QUEUE_MAP_DATA_PREFIX + dataObject.getKey().toString();
+			ByteSequence dataObjectKeyBytesSeq = ByteSequence.from(dataObjectMapKeyStr, DEFAULT_CHARSET);
+			DeleteResponse deleteResponse = kvClient.delete(dataObjectKeyBytesSeq)
+				.get(REQUEST_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+			log.debug("postProcess deleteResponse deleted: {}", deleteResponse.getDeleted());
 			
-			// TODO change key from pending to inprogress
-
-			ByteSequence dataObjectDataBytesSeq = buildByteSeq(dataObject);
-			CompletableFuture<DeleteResponse> res = kvClient.delete(dataObjectDataBytesSeq);
+			// TODO delete also the inprogress key from timestamp map
 			
 		} finally {
 			unlockMap();
